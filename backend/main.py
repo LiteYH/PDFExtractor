@@ -1,4 +1,4 @@
-from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 import pdfplumber
 import google.generativeai as genai
@@ -32,7 +32,10 @@ SYSTEM_PROMPT = (
 
 
 @app.post("/api/extract")
-async def extract_pdf(file: UploadFile = File(...)):
+async def extract_pdf(
+    file: UploadFile = File(...),
+    summarize: bool = Form(True),
+):
     if not file.filename or not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Only PDF files are supported.")
 
@@ -55,27 +58,30 @@ async def extract_pdf(file: UploadFile = File(...)):
             detail="No text could be extracted. The PDF may be scanned or image-based.",
         )
 
-    try:
-        model = genai.GenerativeModel(
-            model_name=MODEL,
-            system_instruction=SYSTEM_PROMPT,
-        )
-        response = model.generate_content(
-            f"Please summarize the following document:\n\n{extracted_text[:MAX_CHARS_FOR_SUMMARY]}",
-            generation_config=genai.GenerationConfig(max_output_tokens=1024),
-            request_options={"timeout": 30},
-        )
-        summary = response.text
-    except Exception as e:
-        msg = str(e)
-        if "credits are depleted" in msg or "RESOURCE_EXHAUSTED" in msg or "429" in msg:
-            raise HTTPException(status_code=402, detail="Gemini API credits are depleted. Please top up at https://ai.studio/projects.")
-        raise HTTPException(status_code=502, detail=f"AI summary failed: {msg}")
+    summary = ""
+    if summarize:
+        try:
+            model = genai.GenerativeModel(
+                model_name=MODEL,
+                system_instruction=SYSTEM_PROMPT,
+            )
+            response = model.generate_content(
+                f"Please summarize the following document:\n\n{extracted_text[:MAX_CHARS_FOR_SUMMARY]}",
+                generation_config=genai.GenerationConfig(max_output_tokens=1024),
+                request_options={"timeout": 30},
+            )
+            summary = response.text
+        except Exception as e:
+            msg = str(e)
+            if "credits are depleted" in msg or "RESOURCE_EXHAUSTED" in msg or "429" in msg:
+                raise HTTPException(status_code=402, detail="Gemini API credits are depleted. Please top up at https://ai.studio/projects.")
+            raise HTTPException(status_code=502, detail=f"AI summary failed: {msg}")
 
     return {
         "filename": file.filename,
         "extracted_text": extracted_text,
         "summary": summary,
+        "summarized": summarize,
         "page_count": len(text_parts),
         "char_count": len(extracted_text),
     }

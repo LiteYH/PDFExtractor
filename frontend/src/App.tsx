@@ -7,6 +7,7 @@ interface ExtractResult {
   filename: string;
   extracted_text: string;
   summary: string;
+  summarized: boolean;
   page_count: number;
   char_count: number;
 }
@@ -17,6 +18,7 @@ export default function App() {
   const [status, setStatus] = useState<Status>("idle");
   const [result, setResult] = useState<ExtractResult | null>(null);
   const [errorMsg, setErrorMsg] = useState("");
+  const [summarize, setSummarize] = useState(true);
 
   const handleUpload = async (file: File) => {
     setStatus("loading");
@@ -25,6 +27,7 @@ export default function App() {
 
     const form = new FormData();
     form.append("file", file);
+    form.append("summarize", String(summarize));
 
     try {
       const base = import.meta.env.VITE_API_URL ?? "";
@@ -44,21 +47,19 @@ export default function App() {
 
   const handleDownload = () => {
     if (!result) return;
-    const content = [
+    const sections = [
       `PDF EXTRACTION REPORT`,
       `=====================`,
       `File: ${result.filename}`,
       `Pages: ${result.page_count}`,
       `Characters: ${result.char_count}`,
       ``,
-      `AI SUMMARY`,
-      `----------`,
-      result.summary,
-      ``,
-      `EXTRACTED TEXT`,
-      `--------------`,
-      result.extracted_text,
-    ].join("\n");
+    ];
+    if (result.summarized && result.summary) {
+      sections.push(`AI SUMMARY`, `----------`, result.summary, ``);
+    }
+    sections.push(`EXTRACTED TEXT`, `--------------`, result.extracted_text);
+    const content = sections.join("\n");
 
     const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
     const url = URL.createObjectURL(blob);
@@ -94,13 +95,28 @@ export default function App() {
         {status !== "done" && (
           <section className="upload-section">
             <FileUpload onUpload={handleUpload} disabled={status === "loading"} />
+            <label className={`summarize-toggle ${status === "loading" ? "disabled" : ""}`}>
+              <input
+                type="checkbox"
+                checked={summarize}
+                disabled={status === "loading"}
+                onChange={(e) => setSummarize(e.target.checked)}
+              />
+              <span className="toggle-track"><span className="toggle-thumb" /></span>
+              <span className="toggle-label">
+                <span className="toggle-title">Generate AI summary</span>
+                <span className="toggle-hint">
+                  {summarize ? "Uses Gemini API (1 call per upload)" : "Extract text only — no API call"}
+                </span>
+              </span>
+            </label>
           </section>
         )}
 
         {status === "loading" && (
           <div className="loading-state">
             <div className="spinner" />
-            <p>Extracting text and generating summary...</p>
+            <p>{summarize ? "Extracting text and generating summary..." : "Extracting text..."}</p>
           </div>
         )}
 
@@ -129,12 +145,14 @@ export default function App() {
               </div>
             </div>
 
-            <div className="panels">
-              <ResultPanel
-                title="AI Summary"
-                content={result.summary}
-                icon="✦"
-              />
+            <div className={`panels ${result.summarized ? "" : "single"}`}>
+              {result.summarized && (
+                <ResultPanel
+                  title="AI Summary"
+                  content={result.summary}
+                  icon="✦"
+                />
+              )}
               <ResultPanel
                 title="Extracted Text"
                 content={result.extracted_text}
